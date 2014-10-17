@@ -1,0 +1,690 @@
+<devicedata>
+    <copyright>Copyright 2014 C4Drivers.  All rights reserved.</copyright>
+    <creator>c4drivers</creator>
+    <manufacturer>Twilio</manufacturer>
+    <name>Twilio SMS</name>
+    <model>SMS</model>
+    <created>05/06/2013 12:00 PM</created>
+    <modified>05/06/2013 12:00 PM</modified>
+    <version>1</version>
+    <small>devices_sm\c4.gif</small>
+    <large>devices_lg\c4.gif</large>
+    <control>lua_gen</control>
+    <controlmethod>ip</controlmethod>
+    <driver>DriverWorks</driver>
+    <templatedescription>Base Template, used in all templates.</templatedescription>
+    <combo>True</combo>
+    <OnlineCategory>others</OnlineCategory>
+    <proxies qty="1">
+        <proxy>base_template</proxy>
+    </proxies>
+    <config>
+        <power_management_method>AlwaysOn</power_management_method>
+        <power_command_delay>0</power_command_delay>
+        <power_delay>0</power_delay>
+        <power_command_needed>False</power_command_needed>
+        <documentation>Twilio provides a cloud based service for sening SMS messages globally at a low cost.
+The details of the service are here https://www.twilio.com/sms.
+
+Once registered the main details that you need are
+- Account SID
+- Auth Token
+- From Number
+You will find the first two on the Dashboard and the last on the Numbers page.
+
+If using the first time you are likely going to have to enable the location to where you want to be able to send SMS messages to.
+You can do this in Account Settings &gt; Geographic Permissions &gt; Messaging
+
+When entering any phone number make sure to use the format +[Country Code][Number with leading 0 removed]
+For example
+US (555) 555-5555 would be +15555555555
+UK (0161) 555-5555 would be +441615555555
+
+The "Send SMS" command sends an SMS with the details defined on the Twilio device properties page.
+The "Send Custom SMS" allows you to override the details for the To and Message device properties with parameters you specify.</documentation>
+        <script><![CDATA[
+--=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+-- Driver Declarations
+--=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+--[[
+	Command Handler Tables
+--]]
+EX_CMD = {}
+PRX_CMD = {}
+NOTIFY = {}
+DEV_MSG = {}
+LUA_ACTION = {}
+
+--[[
+Tables of functions
+The following tables are function containers that are called within the following functions:	
+
+	OnDriverInit()
+		- first calls all functions contained within ON_DRIVER_EARLY_INIT table
+		- then calls all functions contained within ON_DRIVER_INIT table
+	OnDriverLateInit()
+		- calls all functions contained within ON_DRIVER_LATEINIT table
+	OnDriverUpdate()
+		- calls all functions contained within ON_DRIVER_UPDATE table
+	OnDriverDestroyed()
+		- calls all functions contained within ON_DRIVER_DESTROYED table
+	OnPropertyChanged()
+		- calls all functions contained within ON_PROPERTY_CHANGED table
+--]]
+ON_DRIVER_INIT = {}
+ON_DRIVER_EARLY_INIT = {}
+ON_DRIVER_LATEINIT = {}
+ON_DRIVER_UPDATE = {}
+ON_DRIVER_DESTROYED = {}
+ON_PROPERTY_CHANGED = {}
+
+-- Constants
+DEFAULT_PROXY_BINDINGID = 5001
+	  
+--=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+-- Common Driver Code
+--=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+--[[
+	OnPropertyChanged
+		Function called by Director when a property changes value.
+	Parameters
+		sProperty
+			Name of property that has changed.
+	Remarks
+		The value of the property that has changed can be found with: Properties[sName]. Note
+		that OnPropertyChanged is not called when the Property has been changed by the driver
+		calling the UpdateProperty command, only when the Property is changed by the user from
+		the Properties Page. This function is called by Director when a property changes value.
+--]]
+function OnPropertyChanged(sProperty)
+	Dbg:Trace("OnPropertyChanged(" .. sProperty .. ") changed to: " .. Properties[sProperty])
+
+	local propertyValue = Properties[sProperty]
+	
+	-- Remove any spaces (trim the property)
+	local trimmedProperty = string.gsub(sProperty, " ", "")
+
+	-- if function exists then execute (non-stripped)
+	if (ON_PROPERTY_CHANGED[sProperty] ~= nil and type(ON_PROPERTY_CHANGED[sProperty]) == "function") then
+		ON_PROPERTY_CHANGED[sProperty](propertyValue)
+		return
+	-- elseif trimmed function exists then execute
+	elseif (ON_PROPERTY_CHANGED[trimmedProperty] ~= nil and type(ON_PROPERTY_CHANGED[trimmedProperty]) == "function") then
+		ON_PROPERTY_CHANGED[trimmedProperty](propertyValue)
+		return
+	end
+end
+
+function ON_PROPERTY_CHANGED.DebugMode(propertyValue)
+	gDebugTimer:KillTimer()
+	Dbg:OutputPrint(propertyValue:find("Print") ~= nil)
+	Dbg:OutputC4Log(propertyValue:find("Log") ~= nil)
+	if (propertyValue == "Off") then return end
+	gDebugTimer:StartTimer()
+end
+
+function ON_PROPERTY_CHANGED.DebugLevel(propertyValue)
+	Dbg:SetLogLevel(tonumber(string.sub(propertyValue, 1, 1)))
+end
+
+---------------------------------------------------------------------
+-- ExecuteCommand Code
+---------------------------------------------------------------------
+--[[
+	ExecuteCommand
+		Function called by Director when a command is received for this DriverWorks driver.
+		This includes commands created in Composer programming.
+	Parameters
+		sCommand
+			Command to be sent
+		tParams
+			Lua table of parameters for the sent command
+--]]
+function ExecuteCommand(sCommand, tParams)
+	Dbg:Trace("ExecuteCommand(" .. sCommand .. ")")
+	Dbg:Info(tParams)
+
+	-- Remove any spaces (trim the command)
+	local trimmedCommand = string.gsub(sCommand, " ", "")
+
+	-- if function exists then execute (non-stripped)
+	if (EX_CMD[sCommand] ~= nil and type(EX_CMD[sCommand]) == "function") then
+		EX_CMD[sCommand](tParams)
+	-- elseif trimmed function exists then execute
+	elseif (EX_CMD[trimmedCommand] ~= nil and type(EX_CMD[trimmedCommand]) == "function") then
+		EX_CMD[trimmedCommand](tParams)
+	-- handle the command
+	elseif (EX_CMD[sCommand] ~= nil) then
+		QueueCommand(EX_CMD[sCommand])
+	else
+		Dbg:Alert("ExecuteCommand: Unhandled command = " .. sCommand)
+	end
+end
+
+--[[
+	Define any functions of commands (EX_CMD.<command>) received from ExecuteCommand that need to be handled by the driver.
+--]]
+
+function EX_CMD.SendSMS()
+Send the SendSMS with the parameters defined in the properties of the device 
+]]--
+function EX_CMD.SendSMS()
+	SendSMS()
+end
+
+--[[ 
+function EX_CMD.SendCustomSMS()
+Send the SendSMS with the phone number and message defined in the commands parameters 
+]]--
+function EX_CMD.SendCustomSMS(tParams)
+	Dbg:Debug("SendCustomSMS Phone Number = " .. tParams["Phone Number"])
+	Dbg:Debug("SendCustomSMS Message = " .. tParams["Message"])
+
+	--[[ Send the SMS and pass the phone number and message ]]--
+	SendSMS(tParams["Phone Number"], tParams["Message"])
+end
+
+
+--[[
+	EX_CMD.LUA_ACTION
+		Function called for any actions executed by the user from the Actions Tab in Composer.
+--]]
+function EX_CMD.LUA_ACTION(tParams)
+	if tParams ~= nil then
+		for cmd,cmdv in pairs(tParams) do
+			if cmd == "ACTION" then
+				if (LUA_ACTION[cmdv] ~= nil) then
+					LUA_ACTION[cmdv]()
+				else
+					Dbg:Alert("Undefined Action")
+					Dbg:Alert("Key: " .. cmd .. " Value: " .. cmdv)
+				end
+			else
+				Dbg:Alert("Undefined Command")
+				Dbg:Alert("Key: " .. cmd .. " Value: " .. cmdv)
+			end
+		end
+	end
+end
+
+--[[
+	LUA_ACTION.DisplayGlobals
+		Implementation of Action "Display Globals". Executed when selecting the "Display Globals" action within Composer.
+		Provided as an example for actions.
+--]]
+function LUA_ACTION.DisplayGlobals()
+	print ("Global Variables")
+	print ("----------------------------")
+
+	for k,v in pairs(_G) do	-- globals`
+		if not (type(v) == "function") then
+			--print(k .. ":  " .. tostring(v))
+			if (string.find(k, "^g%L")  == 1) then
+				print(k .. ":  " .. tostring(v))
+				if (type(v) == "table") then
+					PrintTable(v, "   ")
+				end
+			end
+		end
+	end
+
+	print ("")
+end
+
+function PrintTable(tValue, sIndent)
+	sIndent = sIndent or "   "
+	for k,v in pairs(tValue) do
+		print(sIndent .. tostring(k) .. ":  " .. tostring(v))
+		if (type(v) == "table") then
+			PrintTable(v, sIndent .. "   ")
+		end
+	end
+end
+
+---------------------------------------------------------------------
+-- ReceivedFromProxy Code
+---------------------------------------------------------------------
+--[[
+	ReceivedFromProxy(idBinding, sCommand, tParams)
+		Function called by Director when a proxy bound to the specified binding sends a
+		BindMessage to the DriverWorks driver.
+
+	Parameters
+		idBinding
+			Binding ID of the proxy that sent a BindMessage to the DriverWorks driver.
+		sCommand
+			Command that was sent
+		tParams
+			Lua table of received command parameters
+--]]
+function ReceivedFromProxy(idBinding, sCommand, tParams)
+	if (sCommand ~= nil) then
+		if(tParams == nil)		-- initial table variable if nil
+			then tParams = {}
+		end
+		Dbg:Trace("ReceivedFromProxy(): " .. sCommand .. " on binding " .. idBinding .. "; Call Function " .. sCommand .. "()")
+		Dbg:Info(tParams)
+
+		if (PRX_CMD[sCommand]) ~= nil then
+			PRX_CMD[sCommand](idBinding, tParams)
+		else
+			Dbg:Alert("ReceivedFromProxy: Unhandled command = " .. sCommand)
+		end
+	end
+end
+
+---------------------------------------------------------------------
+-- Notification Code
+---------------------------------------------------------------------
+-- notify with parameters
+function SendNotify(notifyText, Parms, bindingID)
+	C4:SendToProxy(bindingID, notifyText, Parms, "NOTIFY")
+end
+
+-- A notify with no parameters
+function SendSimpleNotify(notifyText, ...)
+	bindingID = select(1, ...) or DEFAULT_PROXY_BINDINGID
+	C4:SendToProxy(bindingID, notifyText, {}, "NOTIFY")
+end
+
+---------------------------------------------------------------------
+-- Initialization/Destructor Code
+---------------------------------------------------------------------
+--[[
+	OnDriverInit
+		Invoked by director when a driver is loaded. This API is provided for the driver developer to contain all of the driver
+		objects that will require initialization.
+--]]
+function OnDriverInit()
+	C4:ErrorLog("INIT_CODE: OnDriverInit()")
+	-- Call all ON_DRIVER_EARLY_INIT functions.
+	for k,v in pairs(ON_DRIVER_EARLY_INIT) do
+		if (ON_DRIVER_EARLY_INIT[k] ~= nil and type(ON_DRIVER_EARLY_INIT[k]) == "function") then
+			C4:ErrorLog("INIT_CODE: ON_DRIVER_EARLY_INIT." .. k .. "()")
+			ON_DRIVER_EARLY_INIT[k]()
+		end
+	end
+
+	-- Call all ON_DRIVER_INIT functions
+	for k,v in pairs(ON_DRIVER_INIT) do
+		if (ON_DRIVER_INIT[k] ~= nil and type(ON_DRIVER_INIT[k]) == "function") then
+			C4:ErrorLog("INIT_CODE: ON_DRIVER_INIT." .. k .. "()")
+			ON_DRIVER_INIT[k]()
+		end
+	end
+
+	-- Fire OnPropertyChanged to set the initial Headers and other Property global sets, they'll change if Property is changed.
+	for k,v in pairs(Properties) do
+		OnPropertyChanged(k)
+	end
+end
+
+--[[
+	OnDriverUpdate
+		Invoked by director when an update to a driver is requested. This request can occur either by adding a new version of a driver
+		through the driver search list or right clicking on the driver and selecting "Update Driver" from within ComposerPro.
+		Its purpose is to initialize all components of the driver that are reset during a driver update.
+--]]
+function OnDriverUpdate()
+	C4:ErrorLog("INIT_CODE: OnDriverUpdate()")
+	
+	-- Call all ON_DRIVER_UPDATE functions
+	for k,v in pairs(ON_DRIVER_UPDATE) do
+		if (ON_DRIVER_UPDATE[k] ~= nil and type(ON_DRIVER_UPDATE[k]) == "function") then
+			C4:ErrorLog("INIT_CODE: ON_DRIVER_UPDATE." .. k .. "()")
+			ON_DRIVER_UPDATE[k]()
+		end
+	end
+end
+
+--[[
+	OnDriverLateInit
+		Invoked by director after all drivers in the project have been loaded. This API is provided
+		for the driver developer to contain all of the driver objects that will require initialization
+		after all drivers in the project have been loaded.
+--]]
+function OnDriverLateInit()
+	C4:ErrorLog("INIT_CODE: OnDriverLateInit()")
+	
+	-- Call all ON_DRIVER_LATEINIT functions
+	for k,v in pairs(ON_DRIVER_LATEINIT) do
+		if (ON_DRIVER_LATEINIT[k] ~= nil and type(ON_DRIVER_LATEINIT[k]) == "function") then
+			C4:ErrorLog("INIT_CODE: ON_DRIVER_LATEINIT." .. k .. "()")
+			ON_DRIVER_LATEINIT[k]()
+		end
+	end
+end
+
+
+--[[
+	OnDriverDestroyed
+		Function called by Director when a driver is removed. Release things this driver has allocated such as timers.
+--]]
+function OnDriverDestroyed()
+	C4:ErrorLog("INIT_CODE: OnDriverDestroyed()")
+	-- Call all ON_DRIVER_DESTROYED functions
+	for k,v in pairs(ON_DRIVER_DESTROYED) do
+		if (ON_DRIVER_DESTROYED[k] ~= nil and type(ON_DRIVER_DESTROYED[k]) == "function") then
+			C4:ErrorLog("INIT_CODE: ON_DRIVER_DESTROYED." .. k .. "()")
+			ON_DRIVER_DESTROYED[k]()
+		end
+	end
+end
+
+--=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+-- Debug Logging Code
+--=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+Log = {}
+
+-- Create a Table with Logging functions
+function Log:Create()
+	
+	-- table for logging functions
+	local lt = {}
+	
+	lt._logLevel = 0
+	lt._outputPrint = false
+	lt._outputC4Log = false
+	lt._logName =  "Set Log Name to display"
+	
+	function lt:SetLogLevel(level)
+		self._logLevel = level
+	end
+	
+	function lt:OutputPrint(value)
+		self._outputPrint = value
+	end
+	
+	function lt:OutputC4Log(value)
+		self._outputC4Log = value
+	end
+	
+	function lt:SetLogName(name)
+		self._logName = name
+	end
+
+	function lt:Enabled()
+		return (self._outputPrint or self._outputC4Log)
+	end
+	
+	function lt:PrintTable(tValue, sIndent)
+		if (type(tValue) == "table") then
+			if (self._outputPrint) then
+				for k,v in pairs(tValue) do
+					print(sIndent .. tostring(k) .. ":  " .. tostring(v))
+					if (type(v) == "table") then
+						self:PrintTable(v, sIndent .. "   ")
+					end
+				end
+			end
+	
+			if (self._outputC4Log) then
+				for k,v in pairs(tValue) do
+					C4:ErrorLog(self._logName .. ": " .. sIndent .. tostring(k) .. ":  " .. tostring(v))
+					if (type(v) == "table") then
+						self:PrintTable(v, sIndent .. "   ")
+					end
+				end
+			end
+
+		else
+			if (self._outputPrint) then
+				print (sIndent .. tValue)
+			end
+			
+			if (self._outputC4Log) then
+				C4:ErrorLog(self._logName .. ": " .. sIndent .. tValue)
+			end
+		end
+	end
+		
+	function lt:Print(logLevel, sLogText)
+		if (self._logLevel >= logLevel) then
+			if (type(sLogText) == "table") then
+				self:PrintTable(sLogText, "   ")
+				return
+			end
+			
+			if (self._outputPrint) then
+				print (sLogText)
+			end
+
+			if (self._outputC4Log) then
+				C4:ErrorLog(self._logName .. ": " .. sLogText)
+			end
+		end
+	end
+	
+	function lt:Alert(strDebugText)
+		self:Print(0, strDebugText)
+	end
+	
+	function lt:Error(strDebugText)
+		self:Print(1, strDebugText)
+	end
+	
+	function lt:Warn(strDebugText)
+		self:Print(2, strDebugText)
+	end
+	
+	function lt:Info(strDebugText)
+		self:Print(3, strDebugText)
+	end
+	
+	function lt:Trace(strDebugText)
+		self:Print(4, strDebugText)
+	end
+	
+	function lt:Debug(strDebugText)
+		self:Print(5, strDebugText)
+	end
+	
+	return lt
+end
+
+function ON_DRIVER_EARLY_INIT.LogLib()
+	-- Create and initialize debug logging
+	Dbg = Log.Create()
+	Dbg:SetLogName("base_template PLEASE CHANGE")
+end
+
+function ON_DRIVER_INIT.LogLib()
+	-- Create Debug Timer
+	gDebugTimer = Timer:Create("Debug", 45, "MINUTES", OnDebugTimerExpired)
+end
+
+--[[
+	OnDebugTimerExpired
+		Debug timer callback function
+--]]
+function OnDebugTimerExpired()
+	Dbg:Warn("Turning Debug Mode Off (timer expired)")
+	gDebugTimer:KillTimer()
+	C4:UpdateProperty("Debug Mode", "Off")
+	OnPropertyChanged("Debug Mode")
+end
+      
+---------------------------------------------------------------------
+-- Timer Code
+---------------------------------------------------------------------
+Timer = {}
+
+-- Create a Table with Timer functions
+function Timer:Create(name, interval, units, Callback, repeating, Info)
+	-- timers table
+	local tt = {}
+	
+	tt._name = name
+	tt._timerID = TimerLibGetNextTimerID()
+	tt._interval = interval
+	tt._units = units
+	tt._repeating = repeating or false
+	tt._Callback = Callback
+	tt._info = Info or ""
+	tt._id = 0
+
+	function tt:StartTimer(...)
+		self:KillTimer()
+		
+		-- optional parameters (interval, units, repeating)
+		if ... then
+			local interval = select(1, ...)
+			local units = select(2, ...)
+			local repeating = select(3, ...)
+			
+			self._interval = interval or self._interval
+			self._units = units or self._units
+			self._repeating = repeating or self._repeating
+		end
+		
+		if (self._interval > 0) then
+			Dbg:Trace("Starting Timer: " .. self._name)
+			self._id = C4:AddTimer(self._interval, self._units, self._repeating)
+		end
+	end
+
+	function tt:KillTimer()
+		if (self._id) then
+			self._id = C4:KillTimer(self._id)
+		end
+	end
+	
+	function tt:TimerStarted()
+		return (self._id ~= 0)
+	end
+			
+	function tt:TimerStopped()
+		return not self:TimerStarted()
+	end
+	
+	gTimerLibTimers[tt._timerID] = tt
+	Dbg:Trace("Created timer " .. tt._name)
+	
+	return tt
+end
+
+function TimerLibGetNextTimerID()
+	gTimerLibTimerCurID = gTimerLibTimerCurID + 1
+	return gTimerLibTimerCurID
+end
+
+function ON_DRIVER_EARLY_INIT.TimerLib()
+	gTimerLibTimers = {}
+	gTimerLibTimerCurID = 0
+end
+
+function ON_DRIVER_DESTROYED.TimerLib()
+	-- Kill open timers
+	for k,v in pairs(gTimerLibTimers) do
+		v:KillTimer()
+	end
+end
+
+--[[
+	OnTimerExpired
+		Function called by Director when the specified Control4 timer expires.
+	Parameters
+		idTimer
+			Timer ID of expired timer.
+--]]
+function OnTimerExpired(idTimer)
+	for k,v in pairs(gTimerLibTimers) do
+		if (idTimer == v._id) then
+			if (v._Callback) then
+				v._Callback(v._info)
+			end
+		end
+	end
+end
+      ]]></script>
+        <actions>
+            <action>
+                <name>Display Globals</name>
+                <command>DisplayGlobals</command>
+            </action>
+            <action>
+                <name>Send SMS</name>
+                <command>SendSMS</command>
+            </action>
+        </actions>
+        <commands>
+            <command>
+                <name>Send Custom SMS</name>
+                <description>Send a Custom SMS using NAME</description>
+                <params>
+                    <param>
+                        <name>Phone Number</name>
+                        <type>STRING</type>
+                        <readonly>False</readonly>
+                        <default />
+                    </param>
+                    <param>
+                        <name>Message</name>
+                        <type>STRING</type>
+                        <readonly>False</readonly>
+                        <default />
+                    </param>
+                </params>
+            </command>
+        </commands>
+        <properties>
+            <property>
+                <name>Debug Level</name>
+                <type>LIST</type>
+                <readonly>false</readonly>
+                <default>2 - Warning</default>
+                <items>
+                    <item>0 - Alert</item>
+                    <item>1 - Error</item>
+                    <item>2 - Warning</item>
+                    <item>3 - Info</item>
+                    <item>4 - Trace</item>
+                    <item>5 - Debug</item>
+                </items>
+            </property>
+            <property>
+                <name>Debug Mode</name>
+                <type>LIST</type>
+                <readonly>false</readonly>
+                <default>Off</default>
+                <items>
+                    <item>Off</item>
+                    <item>Print</item>
+                    <item>Log</item>
+                    <item>Print and Log</item>
+                </items>
+            </property>
+            <property>
+                <name>Account SID</name>
+                <type>STRING</type>
+                <readonly>false</readonly>
+                <default />
+            </property>
+            <property>
+                <name>Auth Token</name>
+                <type>STRING</type>
+                <readonly>false</readonly>
+                <password>true</password>
+                <default />
+            </property>
+            <property>
+                <name>From</name>
+                <type>STRING</type>
+                <readonly>false</readonly>
+                <default />
+            </property>
+            <property>
+                <name>To</name>
+                <type>STRING</type>
+                <readonly>false</readonly>
+                <default />
+            </property>
+            <property>
+                <name>Message</name>
+                <type>STRING</type>
+                <readonly>false</readonly>
+                <default />
+            </property>
+        </properties>
+    </config>
+</devicedata>
