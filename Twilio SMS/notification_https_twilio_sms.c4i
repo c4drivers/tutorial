@@ -1,11 +1,11 @@
 <devicedata>
     <copyright>Copyright 2014 C4Drivers.  All rights reserved.</copyright>
-    <creator>c4drivers</creator>
+    <creator>C4Drivers</creator>
     <manufacturer>Twilio</manufacturer>
     <name>Twilio SMS</name>
     <model>SMS</model>
-    <created>05/06/2013 12:00 PM</created>
-    <modified>05/06/2013 12:00 PM</modified>
+    <created>01/05/2015 7:29 PM</created>
+    <modified>01/05/2015 7:29 PM</modified>
     <version>1</version>
     <small>devices_sm\c4.gif</small>
     <large>devices_lg\c4.gif</large>
@@ -26,7 +26,12 @@
         <documentation>Twilio provides a cloud based service for sening SMS messages globally at a low cost.
 The details of the service are here https://www.twilio.com/sms.
 
+The "Send SMS" command sends an SMS with the details defined on the Twilio device properties page.
+
+The "Send Custom SMS" allows you to override the details for the To and Message device properties with parameters you specify.
+
 Once registered the main details that you need are
+
 - Account SID
 - Auth Token
 - From Number
@@ -38,10 +43,7 @@ You can do this in Account Settings &gt; Geographic Permissions &gt; Messaging
 When entering any phone number make sure to use the format +[Country Code][Number with leading 0 removed]
 For example
 US (555) 555-5555 would be +15555555555
-UK (0161) 555-5555 would be +441615555555
-
-The "Send SMS" command sends an SMS with the details defined on the Twilio device properties page.
-The "Send Custom SMS" allows you to override the details for the To and Message device properties with parameters you specify.</documentation>
+UK (0161) 555-5555 would be +441615555555</documentation>
         <script><![CDATA[
 --=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 -- Driver Declarations
@@ -166,24 +168,16 @@ end
 --]]
 
 function EX_CMD.SendSMS()
-Send the SendSMS with the parameters defined in the properties of the device 
-]]--
-function EX_CMD.SendSMS()
-	SendSMS()
+ SendSMS()
 end
 
---[[ 
-function EX_CMD.SendCustomSMS()
-Send the SendSMS with the phone number and message defined in the commands parameters 
-]]--
 function EX_CMD.SendCustomSMS(tParams)
-	Dbg:Debug("SendCustomSMS Phone Number = " .. tParams["Phone Number"])
-	Dbg:Debug("SendCustomSMS Message = " .. tParams["Message"])
+ Dbg:Debug("SendCustomSMS Phone Number = " .. tParams["Phone Number"])
+ Dbg:Debug("SendCustomSMS Message = " .. tParams["Message"])
 
-	--[[ Send the SMS and pass the phone number and message ]]--
-	SendSMS(tParams["Phone Number"], tParams["Message"])
+--[[ Send the SMS and pass the phone number and message ]]--
+ SendSMS(tParams["Phone Number"], tParams["Message"])
 end
-
 
 --[[
 	EX_CMD.LUA_ACTION
@@ -239,6 +233,58 @@ function PrintTable(tValue, sIndent)
 			PrintTable(v, sIndent .. "   ")
 		end
 	end
+end
+
+function LUA_ACTION.SendSMS()
+ SendSMS()
+end
+
+function SendSMS(to, message)
+ to = to or Properties["To"]
+ message = message or Properties["Message"]
+ local postdata = "To=" .. urlencode(to) .. "&From=" .. urlencode(Properties["From"]) .. "&Body=" .. urlencode(message)
+ local username = Properties["Account SID"]
+ local password = Properties["Auth Token"]
+ local url = "https://api.twilio.com/2010-04-01/Accounts/" .. username .. "/Messages.json"
+ 
+ --[[ Create the basic authentication header ]]--
+ local http_headers = {}
+ local http_auth = "Basic " .. C4:Base64Encode(username .. ":" .. password)
+ http_headers["Authorization"] = http_auth
+ 
+ --[[ Set the correct content type ]]--
+ http_headers["Content-Type"] = "application/x-www-form-urlencoded"
+ 
+ --[[ Output the debug info ]]--
+ Dbg:Debug("Twilio API Data")
+ Dbg:Debug("---------------")
+ Dbg:Debug("To = " .. Properties["To"])
+ Dbg:Debug("From = " .. Properties["From"])
+ Dbg:Debug("Body = " .. Properties["Message"])
+ Dbg:Debug("Post Data = " .. postdata)
+ Dbg:Debug("Account SID = " .. Properties["Account SID"])
+ Dbg:Debug("Auth Token = " .. Properties["Auth Token"])
+ Dbg:Debug("URL = " .. url)
+ Dbg:Debug("HTTP Authentication: " .. http_auth)
+
+ --[[ Send request to twilio ]]--
+ C4:urlPost(url, postdata, http_headers)
+ 
+end
+
+function ReceivedAsync(idTicket, strData, errMsg, responseCode, tHeaders)
+ Dbg:Debug("Data received from server : " .. strData)
+ Dbg:Debug("Server Return Code: " .. errMsg)
+end
+
+function urlencode(str)
+ if (str) then
+ str = string.gsub (str, "\n", "\r\n")
+ str = string.gsub (str, "([^%w ])",
+ function (c) return string.format ("%%%02X", string.byte(c)) end)
+ str = string.gsub (str, " ", "+")
+ end
+ return str 
 end
 
 ---------------------------------------------------------------------
@@ -610,7 +656,7 @@ end
         <commands>
             <command>
                 <name>Send Custom SMS</name>
-                <description>Send a Custom SMS using NAME</description>
+                <description>Send SMS message PARAM2 to PARAM1 using NAME</description>
                 <params>
                     <param>
                         <name>Phone Number</name>
@@ -625,6 +671,10 @@ end
                         <default />
                     </param>
                 </params>
+            </command>
+            <command>
+                <name>Send SMS</name>
+                <description>Send a SMS using NAME</description>
             </command>
         </commands>
         <properties>
