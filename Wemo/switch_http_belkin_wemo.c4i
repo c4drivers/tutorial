@@ -1,0 +1,807 @@
+<devicedata>
+    <copyright>Copyright 2014 C4Driversn.  All rights reserved.</copyright>
+    <creator>C4Drivers</creator>
+    <manufacturer>Belkin</manufacturer>
+    <name>Wemo Switch</name>
+    <model>Wemo</model>
+    <created>10/17/2014 11:50 PM</created>
+    <modified>10/17/2014 11:50 PM</modified>
+    <version>1</version>
+    <small>devices_sm\c4.gif</small>
+    <large>devices_lg\c4.gif</large>
+    <control>lua_gen</control>
+    <controlmethod>ip</controlmethod>
+    <driver>DriverWorks</driver>
+    <templatedescription>Base Template, used in all templates.</templatedescription>
+    <combo>True</combo>
+    <OnlineCategory>others</OnlineCategory>
+    <proxies qty="1">
+        <proxy>base_template</proxy>
+    </proxies>
+    <config>
+        <power_management_method>AlwaysOn</power_management_method>
+        <power_command_delay>0</power_command_delay>
+        <power_delay>0</power_delay>
+        <power_command_needed>False</power_command_needed>
+        <documentation>Belkin Wemo Switch
+
+http://www.belkin.com/wemo/
+http://www.belkin.com/us/F7C027-Belkin/p/P-F7C027/
+
+Enter the name of the Wemo that you have assigned in the setup utility (or set one on it instead of the default)
+You can verify the info by turning on debug
+
+The only operations supported are to switch it on, or switch it off</documentation>
+        <script><![CDATA[
+--=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+-- Driver Declarations
+--=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+--[[
+	Command Handler Tables
+--]]
+EX_CMD = {}
+PRX_CMD = {}
+NOTIFY = {}
+DEV_MSG = {}
+LUA_ACTION = {}
+
+--[[
+Tables of functions
+The following tables are function containers that are called within the following functions:	
+
+	OnDriverInit()
+		- first calls all functions contained within ON_DRIVER_EARLY_INIT table
+		- then calls all functions contained within ON_DRIVER_INIT table
+	OnDriverLateInit()
+		- calls all functions contained within ON_DRIVER_LATEINIT table
+	OnDriverUpdate()
+		- calls all functions contained within ON_DRIVER_UPDATE table
+	OnDriverDestroyed()
+		- calls all functions contained within ON_DRIVER_DESTROYED table
+	OnPropertyChanged()
+		- calls all functions contained within ON_PROPERTY_CHANGED table
+--]]
+ON_DRIVER_INIT = {}
+ON_DRIVER_EARLY_INIT = {}
+ON_DRIVER_LATEINIT = {}
+ON_DRIVER_UPDATE = {}
+ON_DRIVER_DESTROYED = {}
+ON_PROPERTY_CHANGED = {}
+
+
+--[[
+	Global Variables to hold the devices details
+--]]
+wemo_devices = {}
+wemo_device_ip = ""
+wemo_device_port = ""
+
+
+-- Constants
+DEFAULT_PROXY_BINDINGID = 5001
+	  
+--=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+-- Common Driver Code
+--=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+--[[
+	OnPropertyChanged
+		Function called by Director when a property changes value.
+	Parameters
+		sProperty
+			Name of property that has changed.
+	Remarks
+		The value of the property that has changed can be found with: Properties[sName]. Note
+		that OnPropertyChanged is not called when the Property has been changed by the driver
+		calling the UpdateProperty command, only when the Property is changed by the user from
+		the Properties Page. This function is called by Director when a property changes value.
+--]]
+function OnPropertyChanged(sProperty)
+	Dbg:Trace("OnPropertyChanged(" .. sProperty .. ") changed to: " .. Properties[sProperty])
+
+	local propertyValue = Properties[sProperty]
+	
+	-- Remove any spaces (trim the property)
+	local trimmedProperty = string.gsub(sProperty, " ", "")
+
+	-- if function exists then execute (non-stripped)
+	if (ON_PROPERTY_CHANGED[sProperty] ~= nil and type(ON_PROPERTY_CHANGED[sProperty]) == "function") then
+		ON_PROPERTY_CHANGED[sProperty](propertyValue)
+		return
+	-- elseif trimmed function exists then execute
+	elseif (ON_PROPERTY_CHANGED[trimmedProperty] ~= nil and type(ON_PROPERTY_CHANGED[trimmedProperty]) == "function") then
+		ON_PROPERTY_CHANGED[trimmedProperty](propertyValue)
+		return
+	end
+end
+
+function ON_PROPERTY_CHANGED.DebugMode(propertyValue)
+	gDebugTimer:KillTimer()
+	Dbg:OutputPrint(propertyValue:find("Print") ~= nil)
+	Dbg:OutputC4Log(propertyValue:find("Log") ~= nil)
+	if (propertyValue == "Off") then return end
+	gDebugTimer:StartTimer()
+end
+
+function ON_PROPERTY_CHANGED.DebugLevel(propertyValue)
+	Dbg:SetLogLevel(tonumber(string.sub(propertyValue, 1, 1)))
+end
+
+---------------------------------------------------------------------
+-- ExecuteCommand Code
+---------------------------------------------------------------------
+--[[
+	ExecuteCommand
+		Function called by Director when a command is received for this DriverWorks driver.
+		This includes commands created in Composer programming.
+	Parameters
+		sCommand
+			Command to be sent
+		tParams
+			Lua table of parameters for the sent command
+--]]
+function ExecuteCommand(sCommand, tParams)
+	Dbg:Trace("ExecuteCommand(" .. sCommand .. ")")
+	Dbg:Info(tParams)
+
+	-- Remove any spaces (trim the command)
+	local trimmedCommand = string.gsub(sCommand, " ", "")
+
+	-- if function exists then execute (non-stripped)
+	if (EX_CMD[sCommand] ~= nil and type(EX_CMD[sCommand]) == "function") then
+		EX_CMD[sCommand](tParams)
+	-- elseif trimmed function exists then execute
+	elseif (EX_CMD[trimmedCommand] ~= nil and type(EX_CMD[trimmedCommand]) == "function") then
+		EX_CMD[trimmedCommand](tParams)
+	-- handle the command
+	elseif (EX_CMD[sCommand] ~= nil) then
+		QueueCommand(EX_CMD[sCommand])
+	else
+		Dbg:Alert("ExecuteCommand: Unhandled command = " .. sCommand)
+	end
+end
+
+--[[
+	Define any functions of commands (EX_CMD.<command>) received from ExecuteCommand that need to be handled by the driver.
+--]]
+
+function EX_CMD.SwitchOn()
+	SwitchOn()
+end
+
+function EX_CMD.SwitchOff()
+	SwitchOff()
+end
+
+--[[
+	EX_CMD.LUA_ACTION
+		Function called for any actions executed by the user from the Actions Tab in Composer.
+--]]
+function EX_CMD.LUA_ACTION(tParams)
+	if tParams ~= nil then
+		for cmd,cmdv in pairs(tParams) do
+			if cmd == "ACTION" then
+				if (LUA_ACTION[cmdv] ~= nil) then
+					LUA_ACTION[cmdv]()
+				else
+					Dbg:Alert("Undefined Action")
+					Dbg:Alert("Key: " .. cmd .. " Value: " .. cmdv)
+				end
+			else
+				Dbg:Alert("Undefined Command")
+				Dbg:Alert("Key: " .. cmd .. " Value: " .. cmdv)
+			end
+		end
+	end
+end
+
+--[[
+	LUA_ACTION.DisplayGlobals
+		Implementation of Action "Display Globals". Executed when selecting the "Display Globals" action within Composer.
+		Provided as an example for actions.
+--]]
+function LUA_ACTION.DisplayGlobals()
+	print ("Global Variables")
+	print ("----------------------------")
+
+	for k,v in pairs(_G) do	-- globals`
+		if not (type(v) == "function") then
+			--print(k .. ":  " .. tostring(v))
+			if (string.find(k, "^g%L")  == 1) then
+				print(k .. ":  " .. tostring(v))
+				if (type(v) == "table") then
+					PrintTable(v, "   ")
+				end
+			end
+		end
+	end
+
+	print ("")
+end
+
+function LUA_ACTION.SwitchOn()
+	SwitchOn()
+end
+
+function LUA_ACTION.SwitchOff()
+	SwitchOff()
+end
+
+function LUA_ACTION.uPNPDiscovery()
+	uPNPDiscovery()
+end
+
+function uPNPDiscovery()
+
+	--[[ Create a network connect for destination 239.255.255.250 on UDP port 1900 ]]--
+	C4:CreateNetworkConnection (6001, "239.255.255.250") 
+	C4:NetConnect(6001, 1900, "UDP")
+	
+	local discovery_packet = ""
+	discovery_packet = discovery_packet .. "M-SEARCH * HTTP/1.1\r\n"
+	discovery_packet = discovery_packet .. "HOST: 239.255.255.250:1900\r\n"
+	discovery_packet = discovery_packet .. "MAN: \"ssdp:discover\"\r\n"
+	discovery_packet = discovery_packet .. "MX: 5\r\n"
+	
+	--[[ The following finds all devices
+	discovery_packet = discovery_packet .. "ST: ssdp:all\r\n\r\n"
+	]]--
+	
+	--[[ The following finds only the Wemo devices ]]--
+	discovery_packet = discovery_packet .. "ST: urn:Belkin:device:controllee:1\r\n\r\n"
+	
+	--[[ Show the packet you will be sending out ]]--
+	Dbg:Debug("")
+	Dbg:Debug("Discovery Packet")
+	Dbg:Debug(discovery_packet)
+	
+	--[[ Send the packet to the network on port 1900]]--
+	C4:SendToNetwork (6001, 1900, discovery_packet)
+	
+end
+
+--[[ This callback function is ran when data is returned from the C4:SendToNetwork command ]]--
+function ReceivedFromNetwork(idBinding, nPort, strData)
+	   
+	Dbg:Debug("")
+	Dbg:Debug("Discovery Received")
+	Dbg:Debug(strData)
+	
+	--[[ Parse the LOCATION: Header ]]--
+	_, _, wemo_url = string.find(strData,"LOCATION: (.-)\r")
+	_, _, wemo_ipaddress, wemo_port = string.find(strData,"LOCATION: http://(.-):(%d*)")
+	
+	
+	--[[ Get the data from the URL and work out the IP address and port that matches the name ]]--
+	ticket = C4:urlGet(wemo_url)
+	wemo_devices[ticket] = {}
+	wemo_devices[ticket]["IP Address"] = wemo_ipaddress
+	wemo_devices[ticket]["Port"] = wemo_port
+	
+	Dbg:Debug("Wemo Url = " .. wemo_url)
+	Dbg:Debug("Wemo IP Address = " .. wemo_ipaddress)
+	Dbg:Debug("Wemo Port = " .. wemo_port)
+end
+
+--[[ This callback function is run when the C4:urlGet function is run ]]--
+function ReceivedAsync(ticketId, strData, responseCode, tHeaders)	
+	
+	if wemo_devices[ticketId] then
+		_, _, wemo_devices[ticketId]["Name"] = string.find(strData,"<friendlyName>(.-)</friendlyName>")
+	
+		Dbg:Debug("")
+		Dbg:Debug("Received Wemo Info")
+		Dbg:Debug("Ticket = " .. ticketId)
+		Dbg:Debug("Wemo Name = " .. wemo_devices[ticketId]["Name"])
+		Dbg:Debug("Wemo IP Address = " .. wemo_devices[ticketId]["IP Address"])
+		Dbg:Debug("Wemo Port = " .. wemo_devices[ticketId]["Port"])
+		Dbg:Debug("Full Response Received")
+		Dbg:Debug(strData)
+		
+		if wemo_devices[ticketId]["Name"] == Properties["Name"] then
+			wemo_device_ip = wemo_devices[ticketId]["IP Address"]
+			wemo_device_port = wemo_devices[ticketId]["Port"]
+		end
+		
+		
+	end
+	
+end
+
+function hex_dump (str)
+    local len = string.len( str )
+    local dump = ""
+    local hex = ""
+    local asc = ""
+    
+    for i = 1, len do
+        if 1 == i % 8 then
+            dump = dump .. hex .. asc .. "\n"
+            hex = string.format( "%04x: ", i - 1 )
+            asc = ""
+        end
+        
+        local ord = string.byte( str, i )
+        hex = hex .. string.format( "%02x ", ord )
+        if ord >= 32 and ord <= 126 then
+            asc = asc .. string.char( ord )
+        else
+            asc = asc .. "."
+        end
+    end
+ 
+    
+    return dump .. hex
+            .. string.rep( "   ", 8 - len % 8 ) .. asc
+end
+
+
+function PrintTable(tValue, sIndent)
+	sIndent = sIndent or "   "
+	for k,v in pairs(tValue) do
+		print(sIndent .. tostring(k) .. ":  " .. tostring(v))
+		if (type(v) == "table") then
+			PrintTable(v, sIndent .. "   ")
+		end
+	end
+end
+
+---------------------------------------------------------------------
+-- ReceivedFromProxy Code
+---------------------------------------------------------------------
+--[[
+	ReceivedFromProxy(idBinding, sCommand, tParams)
+		Function called by Director when a proxy bound to the specified binding sends a
+		BindMessage to the DriverWorks driver.
+
+	Parameters
+		idBinding
+			Binding ID of the proxy that sent a BindMessage to the DriverWorks driver.
+		sCommand
+			Command that was sent
+		tParams
+			Lua table of received command parameters
+--]]
+function ReceivedFromProxy(idBinding, sCommand, tParams)
+	if (sCommand ~= nil) then
+		if(tParams == nil)		-- initial table variable if nil
+			then tParams = {}
+		end
+		Dbg:Trace("ReceivedFromProxy(): " .. sCommand .. " on binding " .. idBinding .. "; Call Function " .. sCommand .. "()")
+		Dbg:Info(tParams)
+
+		if (PRX_CMD[sCommand]) ~= nil then
+			PRX_CMD[sCommand](idBinding, tParams)
+		else
+			Dbg:Alert("ReceivedFromProxy: Unhandled command = " .. sCommand)
+		end
+	end
+end
+
+---------------------------------------------------------------------
+-- Notification Code
+---------------------------------------------------------------------
+-- notify with parameters
+function SendNotify(notifyText, Parms, bindingID)
+	C4:SendToProxy(bindingID, notifyText, Parms, "NOTIFY")
+end
+
+-- A notify with no parameters
+function SendSimpleNotify(notifyText, ...)
+	bindingID = select(1, ...) or DEFAULT_PROXY_BINDINGID
+	C4:SendToProxy(bindingID, notifyText, {}, "NOTIFY")
+end
+
+---------------------------------------------------------------------
+-- Initialization/Destructor Code
+---------------------------------------------------------------------
+--[[
+	OnDriverInit
+		Invoked by director when a driver is loaded. This API is provided for the driver developer to contain all of the driver
+		objects that will require initialization.
+--]]
+function OnDriverInit()
+	C4:ErrorLog("INIT_CODE: OnDriverInit()")
+	-- Call all ON_DRIVER_EARLY_INIT functions.
+	for k,v in pairs(ON_DRIVER_EARLY_INIT) do
+		if (ON_DRIVER_EARLY_INIT[k] ~= nil and type(ON_DRIVER_EARLY_INIT[k]) == "function") then
+			C4:ErrorLog("INIT_CODE: ON_DRIVER_EARLY_INIT." .. k .. "()")
+			ON_DRIVER_EARLY_INIT[k]()
+		end
+	end
+
+	-- Call all ON_DRIVER_INIT functions
+	for k,v in pairs(ON_DRIVER_INIT) do
+		if (ON_DRIVER_INIT[k] ~= nil and type(ON_DRIVER_INIT[k]) == "function") then
+			C4:ErrorLog("INIT_CODE: ON_DRIVER_INIT." .. k .. "()")
+			ON_DRIVER_INIT[k]()
+		end
+	end
+
+	-- Fire OnPropertyChanged to set the initial Headers and other Property global sets, they'll change if Property is changed.
+	for k,v in pairs(Properties) do
+		OnPropertyChanged(k)
+	end
+end
+
+--[[
+	OnDriverUpdate
+		Invoked by director when an update to a driver is requested. This request can occur either by adding a new version of a driver
+		through the driver search list or right clicking on the driver and selecting "Update Driver" from within ComposerPro.
+		Its purpose is to initialize all components of the driver that are reset during a driver update.
+--]]
+function OnDriverUpdate()
+	C4:ErrorLog("INIT_CODE: OnDriverUpdate()")
+	
+	-- Call all ON_DRIVER_UPDATE functions
+	for k,v in pairs(ON_DRIVER_UPDATE) do
+		if (ON_DRIVER_UPDATE[k] ~= nil and type(ON_DRIVER_UPDATE[k]) == "function") then
+			C4:ErrorLog("INIT_CODE: ON_DRIVER_UPDATE." .. k .. "()")
+			ON_DRIVER_UPDATE[k]()
+		end
+	end
+end
+
+--[[
+	OnDriverLateInit
+		Invoked by director after all drivers in the project have been loaded. This API is provided
+		for the driver developer to contain all of the driver objects that will require initialization
+		after all drivers in the project have been loaded.
+--]]
+function OnDriverLateInit()
+	C4:ErrorLog("INIT_CODE: OnDriverLateInit()")
+	
+	-- Call all ON_DRIVER_LATEINIT functions
+	for k,v in pairs(ON_DRIVER_LATEINIT) do
+		if (ON_DRIVER_LATEINIT[k] ~= nil and type(ON_DRIVER_LATEINIT[k]) == "function") then
+			C4:ErrorLog("INIT_CODE: ON_DRIVER_LATEINIT." .. k .. "()")
+			ON_DRIVER_LATEINIT[k]()
+		end
+	end
+end
+
+
+--[[
+	OnDriverDestroyed
+		Function called by Director when a driver is removed. Release things this driver has allocated such as timers.
+--]]
+function OnDriverDestroyed()
+	C4:ErrorLog("INIT_CODE: OnDriverDestroyed()")
+	-- Call all ON_DRIVER_DESTROYED functions
+	for k,v in pairs(ON_DRIVER_DESTROYED) do
+		if (ON_DRIVER_DESTROYED[k] ~= nil and type(ON_DRIVER_DESTROYED[k]) == "function") then
+			C4:ErrorLog("INIT_CODE: ON_DRIVER_DESTROYED." .. k .. "()")
+			ON_DRIVER_DESTROYED[k]()
+		end
+	end
+end
+
+--=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+-- Debug Logging Code
+--=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+Log = {}
+
+-- Create a Table with Logging functions
+function Log:Create()
+	
+	-- table for logging functions
+	local lt = {}
+	
+	lt._logLevel = 0
+	lt._outputPrint = false
+	lt._outputC4Log = false
+	lt._logName =  "Set Log Name to display"
+	
+	function lt:SetLogLevel(level)
+		self._logLevel = level
+	end
+	
+	function lt:OutputPrint(value)
+		self._outputPrint = value
+	end
+	
+	function lt:OutputC4Log(value)
+		self._outputC4Log = value
+	end
+	
+	function lt:SetLogName(name)
+		self._logName = name
+	end
+
+	function lt:Enabled()
+		return (self._outputPrint or self._outputC4Log)
+	end
+	
+	function lt:PrintTable(tValue, sIndent)
+		if (type(tValue) == "table") then
+			if (self._outputPrint) then
+				for k,v in pairs(tValue) do
+					print(sIndent .. tostring(k) .. ":  " .. tostring(v))
+					if (type(v) == "table") then
+						self:PrintTable(v, sIndent .. "   ")
+					end
+				end
+			end
+	
+			if (self._outputC4Log) then
+				for k,v in pairs(tValue) do
+					C4:ErrorLog(self._logName .. ": " .. sIndent .. tostring(k) .. ":  " .. tostring(v))
+					if (type(v) == "table") then
+						self:PrintTable(v, sIndent .. "   ")
+					end
+				end
+			end
+
+		else
+			if (self._outputPrint) then
+				print (sIndent .. tValue)
+			end
+			
+			if (self._outputC4Log) then
+				C4:ErrorLog(self._logName .. ": " .. sIndent .. tValue)
+			end
+		end
+	end
+		
+	function lt:Print(logLevel, sLogText)
+		if (self._logLevel >= logLevel) then
+			if (type(sLogText) == "table") then
+				self:PrintTable(sLogText, "   ")
+				return
+			end
+			
+			if (self._outputPrint) then
+				print (sLogText)
+			end
+
+			if (self._outputC4Log) then
+				C4:ErrorLog(self._logName .. ": " .. sLogText)
+			end
+		end
+	end
+	
+	function lt:Alert(strDebugText)
+		self:Print(0, strDebugText)
+	end
+	
+	function lt:Error(strDebugText)
+		self:Print(1, strDebugText)
+	end
+	
+	function lt:Warn(strDebugText)
+		self:Print(2, strDebugText)
+	end
+	
+	function lt:Info(strDebugText)
+		self:Print(3, strDebugText)
+	end
+	
+	function lt:Trace(strDebugText)
+		self:Print(4, strDebugText)
+	end
+	
+	function lt:Debug(strDebugText)
+		self:Print(5, strDebugText)
+	end
+	
+	return lt
+end
+
+function ON_DRIVER_EARLY_INIT.LogLib()
+	-- Create and initialize debug logging
+	Dbg = Log.Create()
+	Dbg:SetLogName("base_template PLEASE CHANGE")
+end
+
+function ON_DRIVER_INIT.LogLib()
+	-- Create Debug Timer
+	gDebugTimer = Timer:Create("Debug", 45, "MINUTES", OnDebugTimerExpired)
+end
+
+--[[
+	OnDebugTimerExpired
+		Debug timer callback function
+--]]
+function OnDebugTimerExpired()
+	Dbg:Warn("Turning Debug Mode Off (timer expired)")
+	gDebugTimer:KillTimer()
+	C4:UpdateProperty("Debug Mode", "Off")
+	OnPropertyChanged("Debug Mode")
+end
+      
+---------------------------------------------------------------------
+-- Timer Code
+---------------------------------------------------------------------
+Timer = {}
+
+-- Create a Table with Timer functions
+function Timer:Create(name, interval, units, Callback, repeating, Info)
+	-- timers table
+	local tt = {}
+	
+	tt._name = name
+	tt._timerID = TimerLibGetNextTimerID()
+	tt._interval = interval
+	tt._units = units
+	tt._repeating = repeating or false
+	tt._Callback = Callback
+	tt._info = Info or ""
+	tt._id = 0
+
+	function tt:StartTimer(...)
+		self:KillTimer()
+		
+		-- optional parameters (interval, units, repeating)
+		if ... then
+			local interval = select(1, ...)
+			local units = select(2, ...)
+			local repeating = select(3, ...)
+			
+			self._interval = interval or self._interval
+			self._units = units or self._units
+			self._repeating = repeating or self._repeating
+		end
+		
+		if (self._interval > 0) then
+			Dbg:Trace("Starting Timer: " .. self._name)
+			self._id = C4:AddTimer(self._interval, self._units, self._repeating)
+		end
+	end
+
+	function tt:KillTimer()
+		if (self._id) then
+			self._id = C4:KillTimer(self._id)
+		end
+	end
+	
+	function tt:TimerStarted()
+		return (self._id ~= 0)
+	end
+			
+	function tt:TimerStopped()
+		return not self:TimerStarted()
+	end
+	
+	gTimerLibTimers[tt._timerID] = tt
+	Dbg:Trace("Created timer " .. tt._name)
+	
+	return tt
+end
+
+function TimerLibGetNextTimerID()
+	gTimerLibTimerCurID = gTimerLibTimerCurID + 1
+	return gTimerLibTimerCurID
+end
+
+function ON_DRIVER_EARLY_INIT.TimerLib()
+	gTimerLibTimers = {}
+	gTimerLibTimerCurID = 0
+end
+
+function ON_DRIVER_DESTROYED.TimerLib()
+	-- Kill open timers
+	for k,v in pairs(gTimerLibTimers) do
+		v:KillTimer()
+	end
+end
+
+--[[
+	OnTimerExpired
+		Function called by Director when the specified Control4 timer expires.
+	Parameters
+		idTimer
+			Timer ID of expired timer.
+--]]
+function OnTimerExpired(idTimer)
+	for k,v in pairs(gTimerLibTimers) do
+		if (idTimer == v._id) then
+			if (v._Callback) then
+				v._Callback(v._info)
+			end
+		end
+	end
+end
+
+
+function SendMessage(endpoint, service, action, args) 
+    args = args or ''
+    
+    -- Create our soap body
+    local body = ''
+    body = body .. '<?xml version="1.0" encoding="utf-8"?>'
+    body = body .. '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">'
+    body = body .. '<s:Body>'
+    body = body .. '<u:' .. action .. ' xmlns:u="urn:Belkin:service:' .. service .. ':1">'
+    body = body .. args
+    body = body .. '</u:' .. action .. '>'
+    body = body .. '</s:Body>'
+    body = body .. '</s:Envelope>'
+
+    -- Specify our headers.
+    local headers = {
+	   ["Connection"] = "close",                 -- Close connection after we have sent the message
+           ["Content-Type"] = 'text/xml;',        -- Sending XML
+           ["Content-Length"] = #body,           -- Length of our body
+	   ['SOAPACTION'] = '"urn:Belkin:service:' .. service .. ':1#' .. action.. '"' -- Specify the action
+    }
+
+    return C4:urlPost(string.format("http://%s:%s%s", wemo_device_ip, wemo_device_port, endpoint), body, headers)                
+end
+
+-- Turn on WeMo device
+function SwitchOn()
+    return SendMessage('/upnp/control/basicevent1', 'basicevent1', 'SetBinaryState', '<BinaryState>1</BinaryState>') -- State 1 (ON)
+end
+
+-- Turn off WeMo device
+function SwitchOff()
+    return SendMessage('/upnp/control/basicevent1', 'basicevent1', 'SetBinaryState', '<BinaryState>0</BinaryState>') -- State 0 (OFF)
+end
+
+
+
+
+      ]]></script>
+        <actions>
+            <action>
+                <name>Display Globals</name>
+                <command>DisplayGlobals</command>
+            </action>
+            <action>
+                <name>Switch On</name>
+                <command>SwitchOn</command>
+            </action>
+            <action>
+                <name>Switch Off</name>
+                <command>SwitchOff</command>
+            </action>
+            <action>
+                <name>uPNP Discovery</name>
+                <command>uPNPDiscovery</command>
+            </action>
+        </actions>
+        <commands>
+            <command>
+                <name>Switch On</name>
+                <description>Switch On NAME</description>
+            </command>
+            <command>
+                <name>Switch Off</name>
+                <description>Switch Off NAME</description>
+            </command>
+        </commands>
+        <properties>
+            <property>
+                <name>Debug Level</name>
+                <type>LIST</type>
+                <readonly>false</readonly>
+                <default>2 - Warning</default>
+                <items>
+                    <item>0 - Alert</item>
+                    <item>1 - Error</item>
+                    <item>2 - Warning</item>
+                    <item>3 - Info</item>
+                    <item>4 - Trace</item>
+                    <item>5 - Debug</item>
+                </items>
+            </property>
+            <property>
+                <name>Debug Mode</name>
+                <type>LIST</type>
+                <readonly>false</readonly>
+                <default>Off</default>
+                <items>
+                    <item>Off</item>
+                    <item>Print</item>
+                    <item>Log</item>
+                    <item>Print and Log</item>
+                </items>
+            </property>
+            <property>
+                <name>Name</name>
+                <type>STRING</type>
+                <readonly>false</readonly>
+                <default />
+            </property>
+        </properties>
+    </config>
+</devicedata>
